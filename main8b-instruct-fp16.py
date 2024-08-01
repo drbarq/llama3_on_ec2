@@ -5,6 +5,7 @@ import boto3
 import time
 import paramiko
 import threading
+from threading import Timer
 import sys
 import os
 import json
@@ -394,12 +395,19 @@ def monitor_instance(instance_id, public_ip):
     shutdown_instance(instance_id)
 
 
-
 def terminate_instance(instance_id):
     print(f"Terminating instance {instance_id}...")
     try:
         ec2.terminate_instances(InstanceIds=[instance_id])
         print(f"Instance {instance_id} termination request sent.")
+    except Exception as e:
+        print(f"Error terminating instance: {e}")
+
+
+def terminate_instance_after_timer(instance_id):
+    print(f"Terminating instance {instance_id} after 1 hour")
+    try:
+        terminate_instance(instance_id)
     except Exception as e:
         print(f"Error terminating instance: {e}")
 
@@ -452,6 +460,11 @@ def main():
     print("Instance is now being monitored. It will shut down automatically based on the specified conditions.")
     print("You can now use the instance. Remember to save your work before the automatic shutdown.")
     print("Press Ctrl+C to exit the script and terminate the instance.")
+
+    # Set a timer to terminate the instance after 1 hour (3600 seconds)
+    print("The instance will automatically terminate in 1 hour.")
+    timer = Timer(3600, terminate_instance_after_timer, [instance_id])
+    timer.start()
 
     try:
         monitor_thread.join()

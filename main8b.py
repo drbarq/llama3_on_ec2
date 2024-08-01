@@ -5,6 +5,7 @@ import boto3
 import time
 import paramiko
 import threading
+from threading import Timer
 import sys
 import os
 import json
@@ -12,6 +13,7 @@ from datetime import datetime
 import signal
 import os
 from dotenv import load_dotenv
+
 
 load_dotenv()
 # after 51 tries, it is DEFAULT_MODELS not DEFAULT_MODEL
@@ -399,6 +401,14 @@ def terminate_instance(instance_id):
         print(f"Error terminating instance: {e}")
 
 
+def terminate_instance_after_timer(instance_id):
+    print(f"Terminating instance {instance_id} after 1 hour")
+    try:
+        terminate_instance(instance_id)
+    except Exception as e:
+        print(f"Error terminating instance: {e}")
+
+
 def signal_handler(signum, frame):
     print("\nReceived signal to terminate. Shutting down the instance...")
     if 'instance_id' in globals():
@@ -448,6 +458,11 @@ def main():
     print("Instance is now being monitored. It will shut down automatically based on the specified conditions.")
     print("You can now use the instance. Remember to save your work before the automatic shutdown.")
     print("Press Ctrl+C to exit the script and terminate the instance.")
+
+    # Set a timer to terminate the instance after 1 hour (3600 seconds)
+    print("The instance will automatically terminate in 1 hour.")
+    timer = Timer(3600, terminate_instance_after_timer, [instance_id])
+    timer.start()
 
     try:
         monitor_thread.join()

@@ -208,14 +208,22 @@ def launch_ec2_instance(ami_id, instance_type, subnet_id, security_group_id, key
                 'AssociatePublicIpAddress': True,
                 'Groups': [security_group_id]
             }],
-            BlockDeviceMappings=[{
-                'DeviceName': '/dev/xvda',
-                'Ebs': {
-                    'VolumeSize': 100,
-                    'VolumeType': 'gp3',
-                    'DeleteOnTermination': True
+            BlockDeviceMappings=[
+                {
+                    'DeviceName': '/dev/xvda',
+                    'Ebs': {
+                        'VolumeSize': 200,
+                        'VolumeType': 'gp3',
+                        'Iops': 3000,
+                        'Throughput': 125,
+                        'DeleteOnTermination': True
+                    }
+                },
+                {
+                    'DeviceName': '/dev/nvme0n1',
+                    'VirtualName': 'ephemeral0'
                 }
-            }],
+            ],
             IamInstanceProfile={'Name': iam_role_name},
             UserData=f'''#!/bin/bash
 exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
@@ -462,64 +470,3 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     main()
-
-
-# def wait_for_instance(instance_id, max_wait_time=600, check_interval=15):
-#     ec2 = boto3.client('ec2')
-#     print(f"Waiting for instance {instance_id} to initialize...")
-#     print(f"Instances generally take 7-10 mins to reach a running state. The current time is {datetime.now()}")
-    
-#     waiter = ec2.get_waiter('instance_running')
-#     start_time = time.time()
-#     elapsed_time = 0
-
-#     while elapsed_time < max_wait_time:
-#         try:
-#             print(f"Calling waiter.wait()... (Elapsed time: {elapsed_time}s)")
-#             waiter.wait(
-#                 InstanceIds=[instance_id]
-#             )
-#             print("Instance is in 'running' state. Now checking for status checks...")
-#             break
-#         except Exception as e:
-#             print(f"Error waiting for instance to run: {e}")
-#             if 'InvalidInstanceID.NotFound' in str(e):
-#                 print("Instance ID not found. Retrying...")
-#                 time.sleep(check_interval)
-#                 elapsed_time = time.time() - start_time
-#             else:
-#                 return False
-        
-#         elapsed_time = time.time() - start_time
-#         print(f"Elapsed time: {elapsed_time}s")
-#         if elapsed_time >= max_wait_time:
-#             print("Maximum wait time reached for instance to enter 'running' state.")
-#             return False
-
-#     print("Exited waiter.wait(), continuing with status checks...")
-
-#     while time.time() - start_time < max_wait_time:
-#         try:
-#             response = ec2.describe_instance_status(InstanceIds=[instance_id])
-#             if response['InstanceStatuses']:
-#                 status = response['InstanceStatuses'][0]
-#                 system_status = status['SystemStatus']['Status']
-#                 instance_status = status['InstanceStatus']['Status']
-                
-#                 elapsed_time = int(time.time() - start_time)
-#                 print(f"Elapsed time: {elapsed_time}s. System status: {system_status}, Instance status: {instance_status}")
-                
-#                 if system_status == 'ok' and instance_status == 'ok':
-#                     print("Instance is fully initialized and ready!")
-#                     return True
-#                 else:
-#                     print(f"Current status - System status: {system_status}, Instance status: {instance_status}. Waiting for both to be 'ok'.")
-#             else:
-#                 print("No instance status available yet. Waiting...")
-#         except Exception as e:
-#             print(f"Error checking instance status: {e}")
-
-#         time.sleep(check_interval)
-
-#     print("Maximum wait time reached. The instance may not be fully initialized.")
-#     return False

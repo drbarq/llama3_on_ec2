@@ -14,11 +14,11 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
 # after 51 tries, it is DEFAULT_MODELS not DEFAULT_MODEL
 
 
 # SSH into the Instance:
-# ssh -i ../OllamaKeyPair.pem ec2-user@34.220.229.65
 # ssh -i /path/to/your/key.pem ec2-user@<instance-public-ip>
 # Tail the Log File:
 # tail -f /var/log/user-data.log
@@ -26,7 +26,7 @@ load_dotenv()
 
 # AWS configuration
 region = 'us-west-2'  # Change this to your desired region
-instance_type = 'g4dn.xlarge'
+instance_type = 'g5.xlarge'
 datadog_api_key = os.getenv("DATADOG_API_KEY")
 key_filename_location = os.getenv("KEY_FILENAME")
 
@@ -174,7 +174,7 @@ def check_model_ready(instance_id, model_name, max_attempts=30, delay=60):
         try:
             ssh_client = paramiko.SSHClient()
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh_client.connect(get_instance_public_ip(instance_id), username='ec2-user', key_filename=key_filename_location)
+            ssh_client.connect(get_instance_public_ip(instance_id), username='ec2-user', key_filename="OllamaKeyPair.pem")
             
             stdin, stdout, stderr = ssh_client.exec_command(f"docker exec ollama ollama list | grep {model_name}")
             if stdout.channel.recv_exit_status() == 0:
@@ -264,8 +264,8 @@ sudo docker run -d --gpus=all -v ollama:/root/.ollama -p 11434:11434 --name olla
 echo "Ollama server installed"
 
 # Pull and run the LLM model
-sudo docker exec ollama ollama pull llama3.1:8b
-sudo docker exec ollama ollama run llama3.1:8b "Hello, World!" > /dev/null 2>&1
+sudo docker exec ollama ollama pull llama3.1:8b-instruct-fp16
+sudo docker exec ollama ollama run llama3.1:8b-instruct-fp16 "Hello, World!" > /dev/null 2>&1
 
 echo "LLM model downloaded and initialized"
 
@@ -277,7 +277,7 @@ echo "OLLAMA_IP: $OLLAMA_IP"  # Debug line to print the IP address
 sudo docker run -d -p 3000:8080 \
   --add-host=host.docker.internal:$OLLAMA_IP \
   -e OLLAMA_API_BASE_URL=http://ollama:11434/api \
-  -e DEFAULT_MODELS=llama3.1:8b \
+  -e DEFAULT_MODELS=llama3.1:8b-instruct-fp16 \
   -v ollama-webui:/app/backend/data \
   --name ollama-webui \
   --network ollama-network \
@@ -348,7 +348,7 @@ def monitor_instance(instance_id, public_ip):
     key = paramiko.RSAKey.from_private_key_file(key_filename_location)
     
     max_retries = 30
-    retry_interval = 10
+    retry_interval = 20
     
     for attempt in range(max_retries):
         try:
@@ -388,6 +388,7 @@ def monitor_instance(instance_id, public_ip):
     
     ssh_client.close()
     shutdown_instance(instance_id)
+
 
 
 def terminate_instance(instance_id):
@@ -434,7 +435,6 @@ def main():
     waiter.wait(InstanceIds=[instance_id])
 
     print("Waiting for instance to initialize...")
-    # wait_for_instance(instance_id)
 
     public_ip = get_instance_public_ip(instance_id)
     print(f"Instance is now running. Public IP: {public_ip}")
@@ -464,23 +464,42 @@ if __name__ == "__main__":
     main()
 
 
-
-# def wait_for_instance(instance_id, max_wait_time=600):
+# def wait_for_instance(instance_id, max_wait_time=600, check_interval=15):
 #     ec2 = boto3.client('ec2')
 #     print(f"Waiting for instance {instance_id} to initialize...")
 #     print(f"Instances generally take 7-10 mins to reach a running state. The current time is {datetime.now()}")
-
+    
 #     waiter = ec2.get_waiter('instance_running')
 #     start_time = time.time()
-    
-#     try:
-#         print(f"Calling waiter.wait() for instance {instance_id}...")
-#         waiter.wait(
-#             InstanceIds=[instance_id]
-#         )
-#         print("Instance is in 'running' state. Now checking for status checks...")
+#     elapsed_time = 0
 
-#         while time.time() - start_time < max_wait_time:
+#     while elapsed_time < max_wait_time:
+#         try:
+#             print(f"Calling waiter.wait()... (Elapsed time: {elapsed_time}s)")
+#             waiter.wait(
+#                 InstanceIds=[instance_id]
+#             )
+#             print("Instance is in 'running' state. Now checking for status checks...")
+#             break
+#         except Exception as e:
+#             print(f"Error waiting for instance to run: {e}")
+#             if 'InvalidInstanceID.NotFound' in str(e):
+#                 print("Instance ID not found. Retrying...")
+#                 time.sleep(check_interval)
+#                 elapsed_time = time.time() - start_time
+#             else:
+#                 return False
+        
+#         elapsed_time = time.time() - start_time
+#         print(f"Elapsed time: {elapsed_time}s")
+#         if elapsed_time >= max_wait_time:
+#             print("Maximum wait time reached for instance to enter 'running' state.")
+#             return False
+
+#     print("Exited waiter.wait(), continuing with status checks...")
+
+#     while time.time() - start_time < max_wait_time:
+#         try:
 #             response = ec2.describe_instance_status(InstanceIds=[instance_id])
 #             if response['InstanceStatuses']:
 #                 status = response['InstanceStatuses'][0]
@@ -497,11 +516,10 @@ if __name__ == "__main__":
 #                     print(f"Current status - System status: {system_status}, Instance status: {instance_status}. Waiting for both to be 'ok'.")
 #             else:
 #                 print("No instance status available yet. Waiting...")
-            
-#             time.sleep(5)
-#     except Exception as e:
-#         print(f"Error waiting for instance to run: {e}")
-#         return False
-    
+#         except Exception as e:
+#             print(f"Error checking instance status: {e}")
+
+#         time.sleep(check_interval)
+
 #     print("Maximum wait time reached. The instance may not be fully initialized.")
 #     return False

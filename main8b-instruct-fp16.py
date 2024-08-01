@@ -212,16 +212,12 @@ def launch_ec2_instance(ami_id, instance_type, subnet_id, security_group_id, key
                 {
                     'DeviceName': '/dev/xvda',
                     'Ebs': {
-                        'VolumeSize': 200,
+                        'VolumeSize': 200,  # Increased to 200GB for more space
                         'VolumeType': 'gp3',
                         'Iops': 3000,
                         'Throughput': 125,
                         'DeleteOnTermination': True
                     }
-                },
-                {
-                    'DeviceName': '/dev/nvme0n1',
-                    'VirtualName': 'ephemeral0'
                 }
             ],
             IamInstanceProfile={'Name': iam_role_name},

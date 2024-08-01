@@ -406,10 +406,9 @@ def terminate_instance(instance_id):
 
 def terminate_instance_after_timer(instance_id):
     print(f"Terminating instance {instance_id} after 1 hour")
-    try:
-        terminate_instance(instance_id)
-    except Exception as e:
-        print(f"Error terminating instance: {e}")
+    terminate_instance(instance_id)
+    print("Instance termination initiated, exiting the script.")
+    os._exit(0)
 
 
 def signal_handler(signum, frame):

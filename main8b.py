@@ -403,11 +403,10 @@ def terminate_instance(instance_id):
 
 def terminate_instance_after_timer(instance_id):
     print(f"Terminating instance {instance_id} after 1 hour")
-    try:
-        terminate_instance(instance_id)
-    except Exception as e:
-        print(f"Error terminating instance: {e}")
-
+    terminate_instance(instance_id)
+    print("Instance termination initiated, exiting the script.")
+    os._exit(0)
+    
 
 def signal_handler(signum, frame):
     print("\nReceived signal to terminate. Shutting down the instance...")
@@ -478,45 +477,3 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
     main()
 
-
-
-# def wait_for_instance(instance_id, max_wait_time=600):
-#     ec2 = boto3.client('ec2')
-#     print(f"Waiting for instance {instance_id} to initialize...")
-#     print(f"Instances generally take 7-10 mins to reach a running state. The current time is {datetime.now()}")
-
-#     waiter = ec2.get_waiter('instance_running')
-#     start_time = time.time()
-    
-#     try:
-#         print(f"Calling waiter.wait() for instance {instance_id}...")
-#         waiter.wait(
-#             InstanceIds=[instance_id]
-#         )
-#         print("Instance is in 'running' state. Now checking for status checks...")
-
-#         while time.time() - start_time < max_wait_time:
-#             response = ec2.describe_instance_status(InstanceIds=[instance_id])
-#             if response['InstanceStatuses']:
-#                 status = response['InstanceStatuses'][0]
-#                 system_status = status['SystemStatus']['Status']
-#                 instance_status = status['InstanceStatus']['Status']
-                
-#                 elapsed_time = int(time.time() - start_time)
-#                 print(f"Elapsed time: {elapsed_time}s. System status: {system_status}, Instance status: {instance_status}")
-                
-#                 if system_status == 'ok' and instance_status == 'ok':
-#                     print("Instance is fully initialized and ready!")
-#                     return True
-#                 else:
-#                     print(f"Current status - System status: {system_status}, Instance status: {instance_status}. Waiting for both to be 'ok'.")
-#             else:
-#                 print("No instance status available yet. Waiting...")
-            
-#             time.sleep(5)
-#     except Exception as e:
-#         print(f"Error waiting for instance to run: {e}")
-#         return False
-    
-#     print("Maximum wait time reached. The instance may not be fully initialized.")
-#     return False

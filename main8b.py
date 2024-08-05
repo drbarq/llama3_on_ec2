@@ -122,6 +122,33 @@ def get_latest_amazon_linux_2_ami():
     return sorted(response['Images'], key=lambda x: x['CreationDate'], reverse=True)[0]['ImageId']
 
 
+def detach_volumes(instance_id):
+    try:
+        volumes = ec2.describe_volumes(Filters=[{'Name': 'attachment.instance-id', 'Values': [instance_id]}])['Volumes']
+        for volume in volumes:
+            ec2.detach_volume(VolumeId=volume['VolumeId'], InstanceId=instance_id, Force=True)
+            print(f"Detached volume {volume['VolumeId']} from instance {instance_id}.")
+    except Exception as e:
+        print(f"Error detaching volumes: {e}")
+
+
+def delete_volumes(instance_id):
+    try:
+        volumes = ec2.describe_volumes(Filters=[{'Name': 'attachment.instance-id', 'Values': [instance_id]}])['Volumes']
+        for volume in volumes:
+            ec2.delete_volume(VolumeId=volume['VolumeId'])
+            print(f"Deleted volume {volume['VolumeId']}.")
+    except Exception as e:
+        print(f"Error deleting volumes: {e}")
+
+
+def detach_and_delete_volumes(instance_id):
+    detach_volumes(instance_id)
+    time.sleep(10)  # Wait for volumes to detach before deleting
+    delete_volumes(instance_id)
+
+
+
 def create_security_group(vpc_id):
     try:
         security_group = ec2.create_security_group(
@@ -395,6 +422,7 @@ def monitor_instance(instance_id, public_ip):
 def terminate_instance(instance_id):
     print(f"Terminating instance {instance_id}...")
     try:
+        detach_and_delete_volumes(instance_id)
         ec2.terminate_instances(InstanceIds=[instance_id])
         print(f"Instance {instance_id} termination request sent.")
     except Exception as e:
@@ -403,6 +431,7 @@ def terminate_instance(instance_id):
 
 def terminate_instance_after_timer(instance_id):
     print(f"Terminating instance {instance_id} after 1 hour")
+    detach_and_delete_volumes(instance_id)
     terminate_instance(instance_id)
     print("Instance termination initiated, exiting the script.")
     os._exit(0)
@@ -411,6 +440,7 @@ def terminate_instance_after_timer(instance_id):
 def signal_handler(signum, frame):
     print("\nReceived signal to terminate. Shutting down the instance...")
     if 'instance_id' in globals():
+        detach_and_delete_volumes(instance_id)
         terminate_instance(instance_id)
     sys.exit(0)
 

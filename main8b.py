@@ -390,6 +390,8 @@ def shutdown_instance(instance_id):
     """
     print("Shutting down the instance...")
     ec2.stop_instances(InstanceIds=[instance_id])
+    waiter = ec2.get_waiter('instance_stopped')
+    waiter.wait(InstanceIds=[instance_id])
     print("Instance stopped.")
 
 
@@ -449,6 +451,7 @@ def terminate_instance(instance_id):
     """
     print(f"Terminating instance {instance_id}...")
     try:
+        shutdown_instance(instance_id)
         detach_and_delete_volumes(instance_id)
         ec2.terminate_instances(InstanceIds=[instance_id])
         print(f"Instance {instance_id} termination request sent.")
@@ -461,7 +464,6 @@ def terminate_instance_after_timer(instance_id):
     Terminates the specified EC2 instance after a set timer (1 hour).
     """
     print(f"Terminating instance {instance_id} after 1 hour")
-    detach_and_delete_volumes(instance_id)
     terminate_instance(instance_id)
     print("Instance termination initiated, exiting the script.")
     os._exit(0)
@@ -473,7 +475,6 @@ def signal_handler(signum, frame):
     """
     print("\nReceived signal to terminate. Shutting down the instance...")
     if 'instance_id' in globals():
-        detach_and_delete_volumes(instance_id)
         terminate_instance(instance_id)
     sys.exit(0)
 

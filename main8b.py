@@ -1,3 +1,15 @@
+"""
+AWS EC2 Management Script
+
+This script automates the deployment and management of an AWS EC2 instance with specific configurations,
+including setting up a VPC, security group, IAM roles, and installing necessary software on the instance.
+It also includes monitoring and automatic shutdown capabilities.
+
+Ensure that you have `boto3`, `paramiko`, `python-dotenv`, and `cryptography` libraries installed.
+Set up AWS credentials with appropriate permissions.
+Create a `.env` file with `DATADOG_API_KEY` and `KEY_FILENAME` variables.
+"""
+
 import warnings
 from cryptography.utils import CryptographyDeprecationWarning
 warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
@@ -16,15 +28,11 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-# after 51 tries, it is DEFAULT_MODELS not DEFAULT_MODEL
-
 
 # SSH into the Instance:
-# ssh -i ../OllamaKeyPair.pem ec2-user@34.220.229.65
 # ssh -i /path/to/your/key.pem ec2-user@<instance-public-ip>
 # Tail the Log File:
 # tail -f /var/log/user-data.log
-
 
 # AWS configuration
 region = 'us-west-2'  # Change this to your desired region
@@ -43,30 +51,38 @@ iam = boto3.client('iam')
 
 
 def get_or_create_vpc():
+    """
+    Creates a new VPC if none exists, including an Internet Gateway, route table, and subnet.
+    Returns the VPC ID.
+    """
     existing_vpcs = list(ec2_resource.vpcs.all())
     if existing_vpcs:
         return existing_vpcs[0].id
-    
+
     vpc = ec2_resource.create_vpc(CidrBlock='10.0.0.0/16')
     vpc.wait_until_available()
     vpc.create_tags(Tags=[{"Key": "Name", "Value": "OllamaVPC"}])
-    
+
     ig = ec2_resource.create_internet_gateway()
     vpc.attach_internet_gateway(InternetGatewayId=ig.id)
-    
+
     route_table = vpc.create_route_table()
     route_table.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=ig.id)
-    
+
     subnet = ec2_resource.create_subnet(VpcId=vpc.id, CidrBlock='10.0.1.0/24')
     route_table.associate_with_subnet(SubnetId=subnet.id)
-    
+
     ec2.modify_subnet_attribute(SubnetId=subnet.id, MapPublicIpOnLaunch={'Value': True})
-    
+
     print(f"Created new VPC: {vpc.id}")
     return vpc.id
 
 
 def create_iam_role():
+    """
+    Creates an IAM role with AmazonS3FullAccess policy for EC2 instances if it does not already exist.
+    Returns the role name.
+    """
     role_name = 'EC2InstanceRoleWithS3Access'
     try:
         # Check if the role already exists
@@ -112,6 +128,9 @@ def create_iam_role():
 
 
 def get_latest_amazon_linux_2_ami():
+    """
+    Retrieves the latest Amazon Linux 2 AMI ID.
+    """
     response = ec2.describe_images(
         Owners=['amazon'],
         Filters=[
@@ -123,6 +142,9 @@ def get_latest_amazon_linux_2_ami():
 
 
 def detach_volumes(instance_id):
+    """
+    Detaches all volumes attached to a specified EC2 instance.
+    """
     try:
         volumes = ec2.describe_volumes(Filters=[{'Name': 'attachment.instance-id', 'Values': [instance_id]}])['Volumes']
         for volume in volumes:
@@ -133,6 +155,9 @@ def detach_volumes(instance_id):
 
 
 def delete_volumes(instance_id):
+    """
+    Deletes all volumes attached to a specified EC2 instance.
+    """
     try:
         volumes = ec2.describe_volumes(Filters=[{'Name': 'attachment.instance-id', 'Values': [instance_id]}])['Volumes']
         for volume in volumes:
@@ -143,13 +168,19 @@ def delete_volumes(instance_id):
 
 
 def detach_and_delete_volumes(instance_id):
+    """
+    Detaches and then deletes all volumes attached to a specified EC2 instance.
+    """
     detach_volumes(instance_id)
     time.sleep(10)  # Wait for volumes to detach before deleting
     delete_volumes(instance_id)
 
 
-
 def create_security_group(vpc_id):
+    """
+    Creates a new security group in the specified VPC with predefined ingress rules.
+    Returns the security group details.
+    """
     try:
         security_group = ec2.create_security_group(
             GroupName='OllamaSecurityGroup',
@@ -179,13 +210,17 @@ def create_security_group(vpc_id):
 
 
 def create_key_pair(key_name):
+    """
+    Creates a new key pair for SSH access if it does not already exist.
+    Returns the key name.
+    """
     try:
         key_pair = ec2.create_key_pair(KeyName=key_name)
         private_key = key_pair['KeyMaterial']
-        
+
         with open(f"{key_name}.pem", 'w') as key_file:
             key_file.write(private_key)
-        
+
         os.chmod(f"{key_name}.pem", 0o400)
         print(f"Created new key pair: {key_name}")
         return key_name
@@ -197,32 +232,11 @@ def create_key_pair(key_name):
             raise
 
 
-def check_model_ready(instance_id, model_name, max_attempts=30, delay=60):
-    print(f"Checking if model {model_name} is ready...")
-    for attempt in range(max_attempts):
-        try:
-            ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh_client.connect(get_instance_public_ip(instance_id), username='ec2-user', key_filename=key_filename_location)
-            
-            stdin, stdout, stderr = ssh_client.exec_command(f"docker exec ollama ollama list | grep {model_name}")
-            if stdout.channel.recv_exit_status() == 0:
-                print(f"Model {model_name} is ready!")
-                ssh_client.close()
-                return True
-            
-            print(f"Model not ready yet. Attempt {attempt + 1}/{max_attempts}. Waiting {delay} seconds...")
-            ssh_client.close()
-            time.sleep(delay)
-        except Exception as e:
-            print(f"Error checking model status: {e}")
-            time.sleep(delay)
-    
-    print(f"Model {model_name} not ready after {max_attempts} attempts.")
-    return False
-
-
 def launch_ec2_instance(ami_id, instance_type, subnet_id, security_group_id, key_name, iam_role_name, datadog_api_key):
+    """
+    Launches an EC2 instance with the specified configuration, including user data for initial setup.
+    Returns the instance details.
+    """
     try:
         print(f"Attempting to launch instance of type {instance_type}")
         response = ec2.run_instances(
@@ -343,6 +357,9 @@ echo "UserData script completed"
 
 
 def get_instance_public_ip(instance_id):
+    """
+    Retrieves the public IP address of a specified EC2 instance.
+    """
     max_retries = 10
     retry_delay = 10
     for _ in range(max_retries):
@@ -356,6 +373,9 @@ def get_instance_public_ip(instance_id):
 
 
 def check_ollama_status(ssh_client):
+    """
+    Checks if the Ollama Docker container is running on the EC2 instance via SSH.
+    """
     try:
         stdin, stdout, stderr = ssh_client.exec_command('docker ps | grep ollama')
         return stdout.channel.recv_exit_status() == 0
@@ -365,20 +385,27 @@ def check_ollama_status(ssh_client):
 
 
 def shutdown_instance(instance_id):
+    """
+    Shuts down the specified EC2 instance.
+    """
     print("Shutting down the instance...")
     ec2.stop_instances(InstanceIds=[instance_id])
     print("Instance stopped.")
 
 
 def monitor_instance(instance_id, public_ip):
+    """
+    Monitors the EC2 instance for activity and shuts it down based on inactivity or maximum runtime.
+    Establishes an SSH connection to the instance.
+    """
     ssh_client = paramiko.SSHClient()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    
+
     key = paramiko.RSAKey.from_private_key_file(key_filename_location)
-    
+
     max_retries = 30
     retry_interval = 10
-    
+
     for attempt in range(max_retries):
         try:
             print(f"Attempting SSH connection (attempt {attempt + 1}/{max_retries})...")
@@ -387,9 +414,6 @@ def monitor_instance(instance_id, public_ip):
             break
         except Exception as e:
             print(f"Failed to connect via SSH: {e}")
-            # print(f"Attempting SSH connection (attempt {attempt + 1}/{max_retries})...")
-            # ssh_client.connect(public_ip, username='ec2-user', pkey=key, timeout=30)
-            # print("SSH connection established")
             time.sleep(retry_interval)
     else:
         print(f"Failed to connect via SSH after {max_retries} attempts. Shutting down.")
@@ -398,28 +422,31 @@ def monitor_instance(instance_id, public_ip):
 
     start_time = time.time()
     last_activity = start_time
-    
+
     while True:
         current_time = time.time()
-        
+
         if current_time - start_time > max_runtime:
             print("Maximum runtime exceeded. Shutting down.")
             break
-        
+
         if check_ollama_status(ssh_client):
             last_activity = current_time
         else:
             if current_time - last_activity > inactivity_threshold:
                 print("Inactivity threshold exceeded. Shutting down.")
                 break
-        
+ 
         time.sleep(60)  # Check every minute
-    
+
     ssh_client.close()
     shutdown_instance(instance_id)
 
 
 def terminate_instance(instance_id):
+    """
+    Terminates the specified EC2 instance and deletes attached volumes.
+    """
     print(f"Terminating instance {instance_id}...")
     try:
         detach_and_delete_volumes(instance_id)
@@ -430,14 +457,20 @@ def terminate_instance(instance_id):
 
 
 def terminate_instance_after_timer(instance_id):
+    """
+    Terminates the specified EC2 instance after a set timer (1 hour).
+    """
     print(f"Terminating instance {instance_id} after 1 hour")
     detach_and_delete_volumes(instance_id)
     terminate_instance(instance_id)
     print("Instance termination initiated, exiting the script.")
     os._exit(0)
-    
+
 
 def signal_handler(signum, frame):
+    """
+    Handles termination signals (SIGINT, SIGTERM) to gracefully shut down the instance.
+    """
     print("\nReceived signal to terminate. Shutting down the instance...")
     if 'instance_id' in globals():
         detach_and_delete_volumes(instance_id)
@@ -446,14 +479,17 @@ def signal_handler(signum, frame):
 
 
 def main():
+    """
+    Main function to execute the workflow: create VPC, security group, key pair, IAM role, launch EC2 instance, and monitor it.
+    """
     global instance_id  # Make instance_id global so it can be accessed by the signal handler
-    
+
     vpc_id = get_or_create_vpc()
     ami_id = get_latest_amazon_linux_2_ami()
     print(f"Using AMI: {ami_id}")
 
     security_group = create_security_group(vpc_id)
-    
+
     subnets = list(ec2_resource.subnets.filter(Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}]))
     if not subnets:
         print("No subnet found. Please check your VPC configuration.")
@@ -461,7 +497,7 @@ def main():
     subnet_id = subnets[0].id
 
     key_name = create_key_pair("OllamaKeyPair")
-    
+
     iam_role_name = create_iam_role()
 
     instance = launch_ec2_instance(ami_id, instance_type, subnet_id, security_group['GroupId'], key_name, iam_role_name, datadog_api_key)
@@ -473,7 +509,6 @@ def main():
     waiter.wait(InstanceIds=[instance_id])
 
     print("Waiting for instance to initialize...")
-    # wait_for_instance(instance_id)
 
     public_ip = get_instance_public_ip(instance_id)
     print(f"Instance is now running. Public IP: {public_ip}")

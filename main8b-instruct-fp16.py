@@ -195,31 +195,6 @@ def create_key_pair(key_name):
             raise
 
 
-def check_model_ready(instance_id, model_name, max_attempts=30, delay=60):
-    print(f"Checking if model {model_name} is ready...")
-    for attempt in range(max_attempts):
-        try:
-            ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh_client.connect(get_instance_public_ip(instance_id), username='ec2-user', key_filename="OllamaKeyPair.pem")
-            
-            stdin, stdout, stderr = ssh_client.exec_command(f"docker exec ollama ollama list | grep {model_name}")
-            if stdout.channel.recv_exit_status() == 0:
-                print(f"Model {model_name} is ready!")
-                ssh_client.close()
-                return True
-            
-            print(f"Model not ready yet. Attempt {attempt + 1}/{max_attempts}. Waiting {delay} seconds...")
-            ssh_client.close()
-            time.sleep(delay)
-        except Exception as e:
-            print(f"Error checking model status: {e}")
-            time.sleep(delay)
-    
-    print(f"Model {model_name} not ready after {max_attempts} attempts.")
-    return False
-
-
 def launch_ec2_instance(ami_id, instance_type, subnet_id, security_group_id, key_name, iam_role_name, datadog_api_key):
     try:
         print(f"Attempting to launch instance of type {instance_type}")
